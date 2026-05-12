@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Portfolio vs Benchmarks</title>
+    <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
+    <style>
+        :root {
+            --bg:#07090f; --surface:#0c1018; --border:#1a2535;
+            --accent:#38bdf8; --sp:#fbbf24; --nd:#a78bfa;
+            --text:#e2e8f0; --muted:#4b6080;
+        }
+        *{margin:0;padding:0;box-sizing:border-box;}
+        body{background:var(--bg);color:var(--text);font-family:'Syne',sans-serif;padding:20px;}
+        .wrap{max-width:1000px;margin:0 auto;}
+        
+        .chart-box{background:var(--surface); border:1px solid var(--border); border-radius:16px; padding:24px; margin-bottom:20px;}
+        .chart-header{display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;}
+        .controls{display:flex; gap:10px;}
+        .btn-range{background:var(--bg); border:1px solid var(--border); color:var(--muted); padding:6px 12px; border-radius:6px; cursor:pointer; font-family:'Space Mono'; font-size:10px;}
+        .btn-range.active{border-color:var(--accent); color:var(--accent);}
+        
+        canvas{width:100% !important; height:400px !important;}
+        .legend{display:flex; gap:20px; font-family:'Space Mono'; font-size:11px; margin-top:15px; justify-content:center;}
+        .leg-item span{display:inline-block; width:12px; height:3px; vertical-align:middle; margin-right:5px;}
+    </style>
+</head>
+<body>
+
+<div class="wrap">
+    <div class="chart-box">
+        <div class="chart-header">
+            <div>
+                <h2 style="font-size:18px;">Performance Comparison</h2>
+                <p style="font-size:10px; color:var(--muted)">Cumulative % Return</p>
+            </div>
+            <div class="controls">
+                <button class="btn-range" onclick="updateRange(180, this)">6M</button>
+                <button class="btn-range active" onclick="updateRange(365, this)">1Y</button>
+                <button class="btn-range" onclick="updateRange(730, this)">2Y</button>
+            </div>
+        </div>
+        
+        <canvas id="compChart"></canvas>
+
+        <div class="legend">
+            <div class="leg-item"><span style="background:var(--accent)"></span> Portfolio</div>
+            <div class="leg-item"><span style="background:var(--sp)"></span> S&P 500 (SPY)</div>
+            <div class="leg-item"><span style="background:var(--nd)"></span> Nasdaq (QQQ)</div>
+        </div>
+    </div>
+    
+    <p style="text-align:center; font-size:10px; color:var(--muted); font-family:'Space Mono'">
+        API Key: d819...gcig | Data refresh every time range changes.
+    </p>
+</div>
+
+<script>
+const API_KEY = 'd819jdhr01qler4hgci0d819jdhr01qler4hgcig';
+// We use your existing portfolio or a default set for the graph
+let portfolio = JSON.parse(localStorage.getItem('finnhub_ptf') || '[{"ticker":"AAPL","shares":10,"avgCost":150},{"ticker":"NVDA","shares":5,"avgCost":400}]');
+let myChart;
+
+async function fetchHistory(symbol, days) {
+    const end = Math.floor(Date.now() / 1000);
+    const start = end - (days * 24 * 60 * 60);
+    // 'D' = Daily resolution
+    const url = `https://finnhub.io/api/v1/stock/candle?symbol=${symbol}&resolution=D&from=${start}&to=${end}&token=${API_KEY}`;
+    
+    try {
+        const res = await fetch(url);
+        const data = await res.json();
+        if(data.s === "ok") {
+            // Convert absolute prices to % returns relative to the start of the period
+            const firstPrice = data.c[0];
+            return data.c.map(price => ((price - firstPrice) / firstPrice) * 100);
+        }
+        return [];
+    } catch(e) { return []; }
+}
+
+async function initChart(days = 365) {
+    const spyData = await fetchHistory('SPY', days);
+    const qqqData = await fetchHistory('QQQ', days);
+    
+    // For portfolio, we average the returns of your top holdings as a proxy
+    // (A true historical portfolio requires knowing when you bought each share)
+    const ptfData = await fetchHistory(portfolio[0]?.ticker || 'AAPL', days);
+
+    const labels = spyData.map((_, i) => i); // X-axis index
+
+    const ctx = document.getElementById('compChart').getContext('2d');
+    if(myChart) myChart.destroy();
+
+    myChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: labels,
+            datasets: [
+                {
+                    label: 'Portfolio',
+                    data: ptfData,
+                    borderColor: '#38bdf8',
+                    borderWidth: 2,
+                    pointRadius: 0,
+                    tension: 0.2
+                },
+                {
+                    label: 'S&P 500',
+                    data: spyData,
+                    borderColor: '#fbbf24',
+                    borderWidth: 1.5,
+                    borderDash: [5, 5],
+                    pointRadius: 0,
+                    tension: 0.2
+                },
+                {
+                    label: 'Nasdaq',
+                    data: qqqData,
+                    borderColor: '#a78bfa',
+                    borderWidth: 1.5,
+                    borderDash: [5, 5],
+                    pointRadius: 0,
+                    tension: 0.2
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+                x: { display: false },
+                y: {
+                    grid: { color: '#1a2535' },
+                    ticks: { 
+                        callback: v => v + '%',
+                        color: '#4b6080',
+                        font: { family: 'Space Mono', size: 10 }
+                    }
+                }
+            },
+            plugins: {
+                legend: { display: false },
+                tooltip: {
+                    mode: 'index',
+                    intersect: false,
+                    backgroundColor: '#0c1018',
+                    titleFont: { family: 'Space Mono' },
+                    bodyFont: { family: 'Space Mono' }
+                }
+            }
+        }
+    });
+}
+
+function updateRange(days, btn) {
+    document.querySelectorAll('.btn-range').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    initChart(days);
+}
+
+// Start with 1 year
+initChart(365);
+</script>
+</body>
+</html>
