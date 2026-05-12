@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Portfolio Dashboard</title>
+    <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
+    <style>
+        :root {
+            --bg:#07090f; --surface:#0c1018; --border:#1a2535;
+            --accent:#38bdf8; --sp:#fbbf24; --nd:#a78bfa;
+            --text:#e2e8f0; --muted:#4b6080; --green:#34d399; --red:#f87171;
+        }
+        *{margin:0;padding:0;box-sizing:border-box;}
+        body{background:var(--bg);color:var(--text);font-family:'Syne',sans-serif;padding:15px;min-height:100vh;}
+        .wrap{max-width:1100px;margin:0 auto;}
+        
+        /* Stats Header */
+        .cards{display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:10px; margin-bottom:20px;}
+        .card{background:var(--surface); border:1px solid var(--border); padding:15px; border-radius:12px; border-top:3px solid var(--accent);}
+        .card-lbl{font-family:'Space Mono'; font-size:9px; color:var(--muted); margin-bottom:5px;}
+        .card-val{font-size:20px; font-weight:800;}
+
+        /* Performance Graph */
+        .chart-box{background:var(--surface); border:1px solid var(--border); border-radius:16px; padding:20px; margin-bottom:20px;}
+        .chart-header{display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;}
+        .btn-range{background:var(--bg); border:1px solid var(--border); color:var(--muted); padding:5px 10px; border-radius:6px; cursor:pointer; font-family:'Space Mono'; font-size:9px;}
+        .btn-range.active{border-color:var(--accent); color:var(--accent);}
+        .chart-container{height:300px; width:100%;}
+
+        /* Asset Manager */
+        .box{background:var(--surface); border:1px solid var(--border); border-radius:16px; padding:20px;}
+        .input-row{display:flex; gap:10px; flex-wrap:wrap; margin-bottom:20px;}
+        input{background:var(--bg); border:1px solid var(--border); border-radius:6px; padding:10px; color:#fff; flex:1; min-width:80px;}
+        .btn-add{background:var(--accent); color:#000; border:none; padding:10px 15px; border-radius:6px; font-weight:800; cursor:pointer;}
+        
+        .tbl-wrap{overflow-x:auto;}
+        table{width:100%; border-collapse:collapse; font-size:12px; min-width:500px;}
+        th{text-align:left; padding:10px; color:var(--muted); font-family:'Space Mono'; border-bottom:1px solid var(--border);}
+        td{padding:12px 10px; border-bottom:1px solid rgba(26,37,53,0.5);}
+        .up{color:var(--green);} .down{color:var(--red);}
+    </style>
+</head>
+<body>
+
+<div class="wrap">
+    <div class="cards">
+        <div class="card"><div class="card-lbl">Portfolio Value</div><div class="card-val" id="v-total">$0.00</div></div>
+        <div class="card"><div class="card-lbl">Total Gain/Loss</div><div class="card-val" id="v-pl">0.00%</div></div>
+        <div class="card"><div class="card-lbl">Market Mood</div><div class="card-val" id="v-mood">--</div></div>
+    </div>
+
+    <div class="chart-box">
+        <div class="chart-header">
+            <h3 style="font-size:14px;">Performance Comparison</h3>
+            <div>
+                <button class="btn-range" onclick="loadChart(180, this)">6M</button>
+                <button class="btn-range active" onclick="loadChart(365, this)">1Y</button>
+                <button class="btn-range" onclick="loadChart(730, this)">2Y</button>
+            </div>
+        </div>
+        <div class="chart-container"><canvas id="mainChart"></canvas></div>
+    </div>
+
+    <div class="box">
+        <h3 style="margin-bottom:15px; font-size:14px;">My Assets</h3>
+        <div class="input-row">
+            <input id="inT" placeholder="Symbol">
+            <input id="inS" type="number" placeholder="Shares">
+            <input id="inC" type="number" placeholder="Avg Cost">
+            <button class="btn-add" onclick="addAsset()">Add</button>
+        </div>
+        <div class="tbl-wrap">
+            <table>
+                <thead><tr><th>Symbol</th><th>Shares</th><th>Cost</th><th>Price</th><th>Equity</th><th>P/L</th><th></th></tr></thead>
+                <tbody id="ptf-body"></tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<script>
+const KEY = 'd819jdhr01qler4hgci0d819jdhr01qler4hgcig';
+let portfolio = JSON.parse(localStorage.getItem('user_stocks_final') || '[]');
+let chart;
+
+async function getLive(s) {
+    const r = await fetch(`https://finnhub.io/api/v1/quote?symbol=${s}&token=${KEY}`);
+    return await r.json();
+}
+
+async function getHistory(s, d) {
+    const end = Math.floor(Date.now() / 1000);
+    const start = end - (d * 86400);
+    const r = await fetch(`https://finnhub.io/api/v1/stock/candle?symbol=${s}&resolution=D&from=${start}&to=${end}&token=${KEY}`);
+    const res = await r.json();
+    return res.s === "ok" ? res.c.map(p => ((p - res.c[0]) / res.c[0]) * 100) : [];
+}
+
+async function loadChart(days, btn) {
+    if(btn) {
+        document.querySelectorAll('.btn-range').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+    }
+    const spy = await getHistory('SPY', days);
+    const qqq = await getHistory('QQQ', days);
+    // Compare against the first stock in your list
+    const mainAsset = portfolio.length > 0 ? await getHistory(portfolio[0].ticker, days) : spy;
+
+    const ctx = document.getElementById('mainChart').getContext('2d');
+    if(chart) chart.destroy();
+    chart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: spy.map((_, i) => i),
+            datasets: [
+                { label: 'Portfolio', data: mainAsset, borderColor: '#38bdf8', borderWidth: 2, pointRadius: 0 },
+                { label: 'S&P 500', data: spy, borderColor: '#fbbf24', borderDash: [5,5], pointRadius: 0 },
+                { label: 'Nasdaq', data: qqq, borderColor: '#a78bfa', borderDash: [5,5], pointRadius: 0 }
+            ]
+        },
+        options: { responsive: true, maintainAspectRatio: false, scales: { x: { display: false }, y: { ticks: { callback: v => v + '%' } } }, plugins: { legend: { display: false } } }
+    });
+}
+
+async function refresh() {
+    const body = document.getElementById('ptf-body');
+    body.innerHTML = '';
+    let totalVal = 0, totalCost = 0;
+
+    for(let a of portfolio) {
+        const q = await getLive(a.ticker);
+        if(q.c === 0) continue;
+        const equity = q.c * a.shares;
+        const pl = ((q.c - a.avgCost) / a.avgCost) * 100;
+        totalVal += equity; totalCost += (a.avgCost * a.shares);
+        body.innerHTML += `<tr><td><b>${a.ticker}</b></td><td>${a.shares}</td><td>$${a.avgCost}</td><td>$${q.c}</td><td>$${equity.toFixed(2)}</td><td class="${pl >= 0 ? 'up' : 'down'}">${pl.toFixed(2)}%</td><td onclick="removeAsset('${a.ticker}')" style="color:var(--red);cursor:pointer">✕</td></tr>`;
+    }
+    document.getElementById('v-total').textContent = `$${totalVal.toLocaleString()}`;
+    const totalPL = totalCost > 0 ? ((totalVal - totalCost) / totalCost) * 100 : 0;
+    document.getElementById('v-pl').textContent = `${totalPL.toFixed(2)}%`;
+    document.getElementById('v-pl').className = `card-val ${totalPL >= 0 ? 'up' : 'down'}`;
+    const spy = await getLive('SPY');
+    document.getElementById('v-mood').textContent = spy.dp >= 0 ? 'Bullish 🐂' : 'Bearish 🐻';
+}
+
+function addAsset() {
+    const t = document.getElementById('inT').value.toUpperCase(), s = parseFloat(document.getElementById('inS').value), c = parseFloat(document.getElementById('inC').value);
+    if(t && s && c) { portfolio.push({ticker:t, shares:s, avgCost:c}); localStorage.setItem('user_stocks_final', JSON.stringify(portfolio)); refresh(); loadChart(365); }
+}
+
+function removeAsset(t) { portfolio = portfolio.filter(a => a.ticker !== t); localStorage.setItem('user_stocks_final', JSON.stringify(portfolio)); refresh(); }
+
+refresh(); loadChart(365);
+</script>
+</body>
+</html>
